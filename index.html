@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Pago Semanal de Personal</title>
+<style>
+    body { font-family: Arial; margin: 20px; }
+    h2 { margin-top: 30px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    table, th, td { border: 1px solid #888; padding: 8px; text-align: left; }
+    input, select { padding: 5px; margin: 5px; }
+    .box { border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; }
+    .total-row { font-weight: bold; background: #f0f0f0; }
+    button { cursor: pointer; }
+</style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+</head>
+<body>
+
+<h1>Aplicación de Pago Semanal</h1>
+
+<!-- CATEGORÍAS -->
+<div class="box">
+    <h2>1. Categorías y Valor por Hora</h2>
+    <input id="categoria" placeholder="Categoría">
+    <input id="valorHora" type="number" placeholder="Valor por hora">
+    <button onclick="agregarCategoria()">Agregar Categoría</button>
+
+    <table id="tablaCategorias">
+        <tr>
+            <th>Categoría</th>
+            <th>Valor por hora</th>
+            <th>Acciones</th>
+        </tr>
+    </table>
+</div>
+
+<!-- EMPLEADOS -->
+<div class="box">
+    <h2>2. Cargar Personal</h2>
+    <input id="nombre" placeholder="Nombre del empleado">
+    <select id="categoriaEmpleado"></select>
+    <input id="horas" type="number" placeholder="Horas trabajadas">
+    <input id="anticipo" type="number" placeholder="Anticipo (opcional)">
+    <button onclick="agregarEmpleado()">Agregar Empleado</button>
+
+    <table id="tablaEmpleados">
+        <tr>
+            <th>Nombre</th>
+            <th>Categoría</th>
+            <th>Valor Hora</th>
+            <th>Horas</th>
+            <th>Anticipo</th>
+            <th>Total</th>
+            <th>Acciones</th>
+        </tr>
+        <tr id="filaTotal" class="total-row">
+            <td colspan="6">TOTAL GENERAL</td>
+            <td id="totalGeneral">$0</td>
+        </tr>
+    </table>
+</div>
+
+<!-- FECHA -->
+<div class="box">
+    <h2>3. Fecha de Pago</h2>
+    <input id="fechaPago" type="date" onchange="mostrarFecha()">
+    <p><b>Fecha seleccionada:</b> <span id="fechaMostrada"></span></p>
+</div>
+
+<button onclick="exportarPDF()">Exportar PDF</button>
+
+<script>
+// ESTADO
+let categorias = {};
+let empleados  = [];
+
+// FORMATO
+function formatoNumero(n) {
+    return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatoFechaDMA(fechaISO) {
+    if (!fechaISO) return "";
+    const partes = fechaISO.split("-");
+    return `${partes[2]}/${partes[1]}/${partes[0]}`;
+}
+
+function mostrarFecha() {
+    const fechaISO = document.getElementById("fechaPago").value;
+    document.getElementById("fechaMostrada").textContent = formatoFechaDMA(fechaISO);
+}
+
+// CATEGORÍAS
+function actualizarSelectCategorias() {
+    const select = document.getElementById("categoriaEmpleado");
+    select.innerHTML = "";
+    for (let cat in categorias) {
+        let option = document.createElement("option");
+        option.value = cat;
+        option.textContent = cat;
+        select.appendChild(option);
+    }
+}
+
+function cargarCategoriasTabla() {
+    const tabla = document.getElementById("tablaCategorias");
+    tabla.innerHTML = `
+        <tr>
+            <th>Categoría</th>
+            <th>Valor por hora</th>
+            <th>Acciones</th>
+        </tr>
+    `;
+    for (let cat in categorias) {
+        let fila = tabla.insertRow();
+        fila.insertCell().textContent = cat;
+        fila.insertCell().textContent = "$" + formatoNumero(categorias[cat]);
+        let acciones = fila.insertCell();
+        acciones.innerHTML = `<button onclick="editarValorHora('${cat}')">✏️ Editar</button>`;
+    }
+}
+
+function agregarCategoria() {
+    const cat   = document.getElementById("categoria").value.trim();
+    const valor = parseFloat(document.getElementById("valorHora").value);
+
+    if (!cat || isNaN(valor)) {
+        alert("Complete categoría y valor");
+        return;
+    }
+
+    categorias[cat] = valor;
+    cargarCategoriasTabla();
+    actualizarSelectCategorias();
+}
+
+function editarValorHora(cat) {
+    let nuevoValor = prompt("Nuevo valor por hora para " + cat, categorias[cat]);
+    if (nuevoValor === null) return;
+    nuevoValor = parseFloat(nuevoValor);
+    if (isNaN(nuevoValor)) {
+        alert("Valor inválido");
+        return;
+    }
+
+    categorias[cat] = nuevoValor;
+
+    empleados.forEach(emp => {
+        if (emp.categoria === cat) {
+            emp.totalNeto = emp.horas * nuevoValor - emp.anticipo;
+        }
+    });
+
+    cargarCategoriasTabla();
+    cargarEmpleadosTabla();
+}
+
+// EMPLEADOS
+function cargarEmpleadosTabla() {
+    const tabla     = document.getElementById("tablaEmpleados");
+    const filaTotal = document.getElementById("filaTotal");
+
+    while (tabla.rows.length > 2) tabla.deleteRow(1);
+
+    empleados.forEach((emp, index) => {
+        let fila = tabla.insertRow(filaTotal.rowIndex);
+        fila.insertCell().textContent = emp.nombre;
+        fila.insertCell().textContent = emp.categoria;
+        fila.insertCell().textContent = "$" + formatoNumero(categorias[emp.categoria]);
+        fila.insertCell().textContent = emp.horas;
+        fila.insertCell().textContent = "$" + formatoNumero(emp.anticipo);
+        fila.insertCell().textContent = "$" + formatoNumero(emp.totalNeto);
+
+        let acciones = fila.insertCell();
+        acciones.innerHTML = `
+            <button onclick="editarHoras(${index})">✏️</button>
+            <button onclick="limpiarHoras(${index})">🧹</button>
+            <button onclick="borrarEmpleado(${index})">❌</button>
+        `;
+    });
+
+    actualizarTotalGeneral();
+}
+
+function agregarEmpleado() {
+    const nombre    = document.getElementById("nombre").value.trim();
+    const categoria = document.getElementById("categoriaEmpleado").value;
+    const horas     = parseFloat(document.getElementById("horas").value);
+    const anticipo  = parseFloat(document.getElementById("anticipo").value) || 0;
+
+    if (!nombre || !categoria || isNaN(horas)) {
+        alert("Complete todos los campos del empleado.");
+        return;
+    }
+
+    const totalNeto = horas * categorias[categoria] - anticipo;
+
+    empleados.push({ nombre, categoria, horas, anticipo, totalNeto });
+    cargarEmpleadosTabla();
+}
+
+function borrarEmpleado(i) {
+    empleados.splice(i, 1);
+    cargarEmpleadosTabla();
+}
+
+function editarHoras(i) {
+    let nuevasHoras = prompt("Ingrese las nuevas horas:", empleados[i].horas);
+    if (nuevasHoras === null) return;
+    nuevasHoras = parseFloat(nuevasHoras);
+    if (isNaN(nuevasHoras)) {
+        alert("Valor inválido");
+        return;
+    }
+
+    empleados[i].horas     = nuevasHoras;
+    empleados[i].totalNeto = nuevasHoras * categorias[empleados[i].categoria] - empleados[i].anticipo;
+
+    cargarEmpleadosTabla();
+}
+
+function limpiarHoras(i) {
+    empleados[i].horas     = 0;
+    empleados[i].totalNeto = -empleados[i].anticipo;
+    cargarEmpleadosTabla();
+}
+
+// TOTAL
+function actualizarTotalGeneral() {
+    let suma = empleados.reduce((acc, emp) => acc + emp.totalNeto, 0);
+    document.getElementById("totalGeneral").textContent = "$" + formatoNumero(suma);
+}
+
+// PDF
+function exportarPDF() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    let y = 10;
+
+    doc.setFontSize(16);
+    doc.text("Resumen de Pago Semanal", 10, y);
+    y += 10;
+
+    const fechaISO = document.getElementById("fechaPago").value || "";
+    const fecha    = formatoFechaDMA(fechaISO);
+    doc.setFontSize(12);
+    doc.text("Fecha de pago: " + fecha, 10, y);
+    y += 10;
+
+    doc.text("Nombre",   10, y);
+    doc.text("Cat.",     50, y);
+    doc.text("V/Hora",   80, y);
+    doc.text("Horas",   110, y);
+    doc.text("Anticipo",140, y);
+    doc.text("Total",   170, y);
+    y += 8;
+
+    empleados.forEach(emp => {
+        doc.text(emp.nombre, 10, y);
+        doc.text(emp.categoria, 50, y);
+        doc.text("$" + formatoNumero(categorias[emp.categoria]), 80, y);
+        doc.text(String(emp.horas), 110, y);
+        doc.text("$" + formatoNumero(emp.anticipo), 140, y);
+        doc.text("$" + formatoNumero(emp.totalNeto), 170, y);
+        y += 8;
+    });
+
+    y += 10;
+    let total = empleados.reduce((acc, emp) => acc + emp.totalNeto, 0);
+    doc.text("TOTAL GENERAL: $" + formatoNumero(total), 10, y);
+
+    doc.save("pago_semanal.pdf");
+}
+
+// INICIO
+window.onload = () => {
+    cargarCategoriasTabla();
+    actualizarSelectCategorias();
+    cargarEmpleadosTabla();
+    mostrarFecha();
+};
+</script>
+
+</body>
+</html>
